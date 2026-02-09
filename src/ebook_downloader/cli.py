@@ -68,6 +68,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--keep-zip", action="store_true",
         help="解压后保留 ZIP 文件",
     )
+    dl.add_argument(
+        "-o", "--output-dir", type=str, default=None,
+        help="指定下载目录（覆盖配置文件中的 download_dir）",
+    )
 
     # list
     ls = sub.add_parser("list", help="列出书籍/分类")
@@ -143,6 +147,9 @@ async def _dispatch(args: argparse.Namespace, config: Config) -> None:
 async def _cmd_download(args: argparse.Namespace, config: Config) -> None:
     """执行下载"""
     # 覆盖配置
+    if args.output_dir:
+        config.download_dir = args.output_dir
+        config.download_path.mkdir(parents=True, exist_ok=True)
     if args.concurrent:
         config.browser_concurrency = args.concurrent
     if args.no_headless:

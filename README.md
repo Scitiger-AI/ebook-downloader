@@ -97,6 +97,10 @@ python -m ebook_downloader download -c AI --formats epub,azw3
 # 解压后保留原始 ZIP 文件
 python -m ebook_downloader download -c AI --keep-zip
 
+# 指定下载目录（覆盖配置文件设置，支持相对/绝对路径）
+python -m ebook_downloader download -c AI -o ~/my-ebooks
+python -m ebook_downloader download -c AI --output-dir /mnt/nas/books
+
 # 调整浏览器并发数（默认 3）
 python -m ebook_downloader download -c AI --concurrent 5
 
