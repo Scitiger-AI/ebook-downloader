@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+
+# 项目运行时数据
+data/all-books.json
+data/state.db
+downloads/
+logs/
+
+# 用户配置
+config.yaml
+config.yml
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

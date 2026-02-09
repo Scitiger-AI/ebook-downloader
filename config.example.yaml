@@ -1,0 +1,39 @@
+# 下载目录（相对于项目根目录或绝对路径）
+download_dir: downloads
+
+# 数据目录
+data_dir: data
+
+# 日志目录
+log_dir: logs
+
+# 数据源 URL
+data_url: https://raw.githubusercontent.com/jbiaojerry/ebook-treasure-chest/main/docs/all-books.json
+
+# 浏览器并发 Context 数
+browser_concurrency: 3
+
+# HTTP 下载并发数（独立于浏览器）
+download_concurrency: 5
+
+# 单次下载超时（秒）
+download_timeout: 300
+
+# 浏览器操作超时（秒）
+browser_timeout: 30
+
+# 失败重试次数
+max_retries: 3
+
+# 重试退避基数（秒）
+retry_backoff: 5
+
+# 是否使用 headless 模式
+headless: true
+
+# 解压后提取的电子书格式（可选: epub, azw3, mobi）
+extract_formats:
+  - epub
+
+# 解压后是否保留 ZIP 文件
+keep_zip: false
