@@ -59,6 +59,7 @@ class Catalog:
     def filter(
         self,
         categories: list[str] | None = None,
+        exclude_categories: list[str] | None = None,
         keyword: str | None = None,
         limit: int | None = None,
     ) -> list[Book]:
@@ -68,6 +69,10 @@ class Catalog:
         if categories:
             cat_set = set(categories)
             result = [b for b in result if b.category in cat_set]
+
+        if exclude_categories:
+            exc_set = set(exclude_categories)
+            result = [b for b in result if b.category not in exc_set]
 
         if keyword:
             kw = keyword.lower()

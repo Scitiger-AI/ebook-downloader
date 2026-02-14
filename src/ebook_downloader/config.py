@@ -27,7 +27,11 @@ class Config:
 
     # 并发控制
     browser_concurrency: int = 3
-    download_concurrency: int = 5
+    download_concurrency: int = 10  # HTTP 下载并发数（独立于浏览器，仅控制下载阶段）
+
+    # 生产者-消费者队列
+    cdn_queue_size: int = 20          # CDN 任务队列容量（防积压导致链接过期）
+    max_download_retries: int = 2     # 下载阶段独立重试次数
 
     # 超时配置（秒）
     download_timeout: int = 300
@@ -39,6 +43,18 @@ class Config:
 
     # 浏览器
     headless: bool = True
+
+    # 代理池
+    proxy_api_url: str = ""  # 代理池 API 地址，为空则不使用代理
+
+    # 智能延迟（模拟真人行为，避免反爬）
+    request_min_delay: float = 5.0   # 两次页面访问之间的最小间隔（秒）
+    request_max_delay: float = 15.0  # 两次页面访问之间的最大间隔（秒）
+    enable_smart_delay: bool = True  # 是否启用智能延迟
+
+    # 书籍过滤
+    exclude_categories: list[str] = field(default_factory=list)  # 排除的分类（如漫画、绘本等大图类）
+    max_file_size: int = 500  # 单文件大小上限（MB），超过则跳过，0 表示不限制
 
     # 解压配置
     extract_formats: list[str] = field(default_factory=lambda: ["epub"])

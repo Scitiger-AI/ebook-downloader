@@ -13,8 +13,18 @@ data_url: https://raw.githubusercontent.com/jbiaojerry/ebook-treasure-chest/main
 # 浏览器并发 Context 数
 browser_concurrency: 3
 
-# HTTP 下载并发数（独立于浏览器）
-download_concurrency: 5
+# HTTP 下载并发数（独立于浏览器，仅控制下载阶段）
+# 生产者-消费者架构：浏览器获取CDN链接 → 队列 → HTTP并行下载
+# 该值不影响反爬策略，可适当调高以提升下载吞吐量
+download_concurrency: 10
+
+# CDN 任务队列容量（生产者-消费者缓冲区）
+# 过大会导致队列中链接过期，过小会导致消费者空闲等待
+cdn_queue_size: 20
+
+# 下载阶段独立重试次数（仅HTTP下载+解压阶段）
+# CDN获取阶段的重试由 max_retries 控制
+max_download_retries: 2
 
 # 单次下载超时（秒）
 download_timeout: 300
@@ -31,9 +41,30 @@ retry_backoff: 5
 # 是否使用 headless 模式
 headless: true
 
+# 【方案C - 智能延迟】模拟真人行为，避免反爬检测
+# 在两次浏览器访问之间添加随机延迟（秒）
+request_min_delay: 5.0   # 最小间隔
+request_max_delay: 15.0  # 最大间隔
+enable_smart_delay: true # 是否启用（建议保持 true）
+
 # 解压后提取的电子书格式（可选: epub, azw3, mobi）
 extract_formats:
   - epub
 
 # 解压后是否保留 ZIP 文件
 keep_zip: false
+
+# 排除的书籍分类（图片类书籍体积大，下载慢）
+exclude_categories:
+  - 漫画
+  - 绘本
+  - 绘画
+  - 画册
+  - 卡通
+  - 美漫
+  - 国漫
+  - 动漫
+  - 手绘
+
+# 单文件大小上限（MB），超过则跳过下载，0 表示不限制
+max_file_size: 500

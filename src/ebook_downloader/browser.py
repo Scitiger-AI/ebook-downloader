@@ -30,6 +30,7 @@ from playwright.async_api import (
 
 from .config import Config
 from .models import Book
+from .proxy import ProxyPool
 
 logger = logging.getLogger(__name__)
 
@@ -45,8 +46,9 @@ class CDNResult:
 class BrowserManager:
     """浏览器生命周期管理 + CDN 链接提取"""
 
-    def __init__(self, config: Config) -> None:
+    def __init__(self, config: Config, proxy_pool: ProxyPool | None = None) -> None:
         self.config = config
+        self.proxy_pool = proxy_pool
         self._playwright: Playwright | None = None
         self._browser: Browser | None = None
         self._semaphore = asyncio.Semaphore(config.browser_concurrency)
@@ -86,13 +88,23 @@ class BrowserManager:
         if not self._browser:
             raise RuntimeError("浏览器未启动")
 
-        context = await self._browser.new_context(
-            user_agent=(
+        # 构建 Context 参数
+        context_kwargs: dict = {
+            "user_agent": (
                 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
                 "Chrome/120.0.0.0 Safari/537.36"
             ),
-        )
+        }
+
+        # 从代理池获取代理（代理仅用于浏览器访问 ctfile.com）
+        if self.proxy_pool:
+            proxy_url = await self.proxy_pool.get_proxy()
+            if proxy_url:
+                context_kwargs["proxy"] = {"server": proxy_url}
+                logger.debug("Context 使用代理: %s", proxy_url)
+
+        context = await self._browser.new_context(**context_kwargs)
 
         try:
             page = await context.new_page()
@@ -143,6 +155,10 @@ class BrowserManager:
         except asyncio.TimeoutError:
             raise TimeoutError(f"获取 CDN 链接超时: {book.title}")
         except Exception as e:
+            # 检测代理连接级错误，标记代理失效
+            if self.proxy_pool and _is_proxy_error(e):
+                await self.proxy_pool.invalidate()
+                logger.info("代理连接失败，已触发切换: %s", e)
             raise RuntimeError(f"获取 CDN 链接失败 ({book.title}): {e}") from e
 
     async def _click_download_button(self, page: Page) -> None:
@@ -180,7 +196,19 @@ class BrowserManager:
         except Exception:
             pass
 
-        logger.warning("未找到下载按钮")
+        # 未找到下载按钮 — 可能被反爬封锁，保存截图用于诊断
+        try:
+            screenshot_path = self.config.log_path / "blocked_page.png"
+            await page.screenshot(path=str(screenshot_path))
+            logger.debug("已保存封锁页面截图: %s", screenshot_path)
+        except Exception as e:
+            logger.debug("保存截图失败: %s", e)
+
+        # 标记当前代理失效，触发下次请求切换代理
+        if self.proxy_pool:
+            await self.proxy_pool.invalidate()
+
+        logger.warning("未找到下载按钮（可能被反爬封锁）")
         raise RuntimeError("未找到下载按钮")
 
 
@@ -229,3 +257,24 @@ def _parse_cdn_response(body: str) -> CDNResult | None:
     file_size = data.get("file_size", 0)
 
     return CDNResult(url=cdn_url, filename=filename, file_size=file_size)
+
+
+# 代理连接失败的特征关键词（Playwright / Chromium 错误信息）
+_PROXY_ERROR_PATTERNS = (
+    "ERR_TUNNEL_CONNECTION_FAILED",  # CONNECT 隧道失败
+    "ERR_PROXY_CONNECTION_FAILED",   # 代理连接失败
+    "ERR_PROXY_AUTH_UNSUPPORTED",    # 代理认证不支持
+    "ERR_PROXY_AUTH_REQUESTED",      # 代理要求认证
+    "ERR_PROXY_CERTIFICATE_INVALID", # 代理证书无效
+    "ERR_SOCKS_CONNECTION_FAILED",   # SOCKS 代理失败
+    "ERR_CONNECTION_RESET",          # 连接被重置（代理过期常见）
+    "ERR_CONNECTION_REFUSED",        # 连接被拒绝（代理已下线）
+    "ERR_CONNECTION_TIMED_OUT",      # 连接超时（代理不可达）
+    "ERR_TIMED_OUT",                 # 整体超时
+)
+
+
+def _is_proxy_error(exc: Exception) -> bool:
+    """判断异常是否为代理连接级错误"""
+    msg = str(exc).upper()
+    return any(pattern in msg for pattern in _PROXY_ERROR_PATTERNS)

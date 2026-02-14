@@ -116,6 +116,15 @@ class StateDB:
         rows = await cursor.fetchall()
         return {row["book_uid"] for row in rows}
 
+    async def get_skip_uids(self) -> set[str]:
+        """获取应跳过的 book_uid（已完成 + 文件损坏已跳过）"""
+        cursor = await self.db.execute(
+            "SELECT book_uid FROM download_records WHERE status IN (?, ?)",
+            (DownloadStatus.COMPLETED.value, DownloadStatus.SKIPPED.value),
+        )
+        rows = await cursor.fetchall()
+        return {row["book_uid"] for row in rows}
+
     async def stats(self) -> dict[str, int]:
         """统计各状态数量"""
         cursor = await self.db.execute(
@@ -138,10 +147,22 @@ class StateDB:
         return await self.get_by_status(DownloadStatus.FAILED)
 
     async def reset_failed(self) -> int:
-        """将所有失败记录重置为 pending，返回影响行数"""
+        """将所有失败和跳过记录重置为 pending，返回影响行数"""
+        cursor = await self.db.execute(
+            "UPDATE download_records SET status = ?, error_msg = '', retry_count = 0 WHERE status IN (?, ?)",
+            (DownloadStatus.PENDING.value, DownloadStatus.FAILED.value, DownloadStatus.SKIPPED.value),
+        )
+        await self.db.commit()
+        return cursor.rowcount
+
+    async def reset_downloading(self) -> int:
+        """将所有 downloading 记录重置为 pending，返回影响行数
+
+        用于清理上次运行中断后残留的异常状态。
+        """
         cursor = await self.db.execute(
             "UPDATE download_records SET status = ?, error_msg = '', retry_count = 0 WHERE status = ?",
-            (DownloadStatus.PENDING.value, DownloadStatus.FAILED.value),
+            (DownloadStatus.PENDING.value, DownloadStatus.DOWNLOADING.value),
         )
         await self.db.commit()
         return cursor.rowcount

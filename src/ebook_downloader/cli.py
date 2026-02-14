@@ -10,6 +10,8 @@ import sys
 from .catalog import Catalog, fetch_catalog
 from .config import Config, load_config
 from .browser import BrowserManager
+from .models import DownloadStatus
+from .proxy import ProxyPool
 from .scheduler import Scheduler
 from .state import StateDB
 from .utils import (
@@ -57,6 +59,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="覆盖浏览器并发数",
     )
     dl.add_argument(
+        "--download-concurrent", type=int, default=None,
+        help="覆盖 HTTP 下载并发数（独立于浏览器并发）",
+    )
+    dl.add_argument(
         "--no-headless", action="store_true",
         help="显示浏览器窗口（调试用）",
     )
@@ -71,6 +77,14 @@ def build_parser() -> argparse.ArgumentParser:
     dl.add_argument(
         "-o", "--output-dir", type=str, default=None,
         help="指定下载目录（覆盖配置文件中的 download_dir）",
+    )
+    dl.add_argument(
+        "--proxy-api", type=str, default=None,
+        help="代理池 API 地址（如 https://dps.kdlapi.com/api/getdps/...）",
+    )
+    dl.add_argument(
+        "--proxy-file", type=str, default=None,
+        help="本地代理文件路径（每行一个 ip:port，与 --proxy-api 互斥）",
     )
 
     # list
@@ -96,7 +110,19 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("status", help="查看下载统计")
 
     # retry
-    sub.add_parser("retry", help="重试所有失败项")
+    rt = sub.add_parser("retry", help="重试所有失败项")
+    rt.add_argument(
+        "--proxy-api", type=str, default=None,
+        help="代理池 API 地址（如 https://dps.kdlapi.com/api/getdps/...）",
+    )
+    rt.add_argument(
+        "--proxy-file", type=str, default=None,
+        help="本地代理文件路径（每行一个 ip:port，与 --proxy-api 互斥）",
+    )
+    rt.add_argument(
+        "--no-headless", action="store_true",
+        help="显示浏览器窗口（调试用）",
+    )
 
     # fetch-data
     sub.add_parser("fetch-data", help="下载/更新 all-books.json 数据源")
@@ -152,6 +178,8 @@ async def _cmd_download(args: argparse.Namespace, config: Config) -> None:
         config.download_path.mkdir(parents=True, exist_ok=True)
     if args.concurrent:
         config.browser_concurrency = args.concurrent
+    if args.download_concurrent:
+        config.download_concurrency = args.download_concurrent
     if args.no_headless:
         config.headless = False
     if args.formats:
@@ -166,6 +194,7 @@ async def _cmd_download(args: argparse.Namespace, config: Config) -> None:
 
     books = catalog.filter(
         categories=args.categories,
+        exclude_categories=config.exclude_categories or None,
         keyword=args.keyword,
         limit=args.limit,
     )
@@ -179,7 +208,19 @@ async def _cmd_download(args: argparse.Namespace, config: Config) -> None:
     state = StateDB(config.db_path)
     await state.open()
 
-    browser = BrowserManager(config)
+    # 创建代理池（--proxy-file 优先，其次 --proxy-api，最后配置文件）
+    proxy_file = getattr(args, "proxy_file", None)
+    proxy_api = getattr(args, "proxy_api", None) or config.proxy_api_url
+    proxy_pool: ProxyPool | None = None
+
+    if proxy_file:
+        proxy_pool = ProxyPool(proxy_file=proxy_file)
+        console.print(f"[bold blue]代理文件已启用: {proxy_file}[/bold blue]")
+    elif proxy_api:
+        proxy_pool = ProxyPool(api_url=proxy_api)
+        console.print(f"[bold blue]代理池已启用: {proxy_api}[/bold blue]")
+
+    browser = BrowserManager(config, proxy_pool=proxy_pool)
     await browser.start()
 
     try:
@@ -220,6 +261,7 @@ async def _cmd_list(args: argparse.Namespace, config: Config) -> None:
         # 列出书籍
         books = catalog.filter(
             categories=args.category,
+            exclude_categories=config.exclude_categories or None,
             keyword=args.keyword,
             limit=args.limit,
         )
@@ -258,17 +300,24 @@ async def _cmd_status(config: Config) -> None:
 
 async def _cmd_retry(args: argparse.Namespace, config: Config) -> None:
     """重试失败项"""
+    if getattr(args, "no_headless", False):
+        config.headless = False
+
     state = StateDB(config.db_path)
     await state.open()
     try:
         failed = await state.get_failed()
-        if not failed:
-            console.print("[green]没有失败的下载记录[/green]")
+        skipped = await state.get_by_status(DownloadStatus.SKIPPED)
+        total = len(failed) + len(skipped)
+        if not total:
+            console.print("[green]没有失败或跳过的下载记录[/green]")
             return
 
-        console.print(f"[bold]找到 {len(failed)} 个失败项，正在重置...[/bold]")
+        console.print(
+            f"[bold]找到 {len(failed)} 个失败项 + {len(skipped)} 个跳过项，正在重置...[/bold]"
+        )
         count = await state.reset_failed()
-        console.print(f"[green]已重置 {count} 个失败项为待下载状态[/green]")
+        console.print(f"[green]已重置 {count} 个记录为待下载状态[/green]")
         console.print("[dim]请运行 download 命令以重新下载[/dim]")
     finally:
         await state.close()

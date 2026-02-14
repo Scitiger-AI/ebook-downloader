@@ -21,6 +21,10 @@ ProgressCallback = Callable[[int, int, int], None] | None
 CHUNK_SIZE = 64 * 1024  # 64KB
 
 
+class FileTooLargeError(Exception):
+    """文件超过大小上限"""
+
+
 async def download_file(
     url: str,
     dest: Path,
@@ -87,6 +91,14 @@ async def download_file(
                     downloaded = 0
 
             mode = "ab" if response.status_code == 206 else "wb"
+
+            # 文件大小上限检查（仅读 Header，不浪费带宽）
+            if config.max_file_size > 0 and total > 0:
+                max_bytes = config.max_file_size * 1024 * 1024
+                if total > max_bytes:
+                    raise FileTooLargeError(
+                        f"文件大小 {_format_size(total)} 超过上限 {config.max_file_size}MB"
+                    )
 
             with open(part_file, mode) as f:
                 async for chunk in response.aiter_bytes(CHUNK_SIZE):

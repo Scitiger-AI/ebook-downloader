@@ -15,6 +15,7 @@ logs/
 # 用户配置
 config.yaml
 config.yml
+proxy.txt
 
 # IDE
 .idea/
